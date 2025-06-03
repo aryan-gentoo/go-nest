@@ -56,7 +56,7 @@ import (
 
 func main() {
 	app := core.NewApp()
-	app.Run()
+	app.Run(":8080")
 }
 `
 	writeFile(name+"/main.go", mainGo)
@@ -71,16 +71,35 @@ func main() {
 	// core/app.go
 	appGo := `package core
 
-import "fmt"
+import (
+	"log"
+	"net/http"
 
-type App struct{}
+	"github.com/go-chi/chi/v5"
+)
 
-func NewApp() *App {
-	return &App{}
+type Module interface {
+	RegisterRoutes(r chi.Router)
 }
 
-func (a *App) Run() {
-	fmt.Println("🚀 Go Nest app is running!")
+type App struct {
+	router  chi.Router
+	modules []Module
+}
+
+func NewApp(modules ...Module) *App {
+	return &App{
+		router:  chi.NewRouter(),
+		modules: modules,
+	}
+}
+
+func (a *App) Run(addr string) {
+	for _, m := range a.modules {
+		m.RegisterRoutes(a.router)
+	}
+	log.Println("Server started at", addr)
+	http.ListenAndServe(addr, a.router)
 }
 `
 	writeFile(name+"/core/app.go", appGo)
@@ -88,7 +107,9 @@ func (a *App) Run() {
 	// core/container.go
 	containerGo := `package core
 
-// Use this file to manage DI (Dependency Injection)
+import "go.uber.org/dig"
+
+var Container = dig.New()
 `
 	writeFile(name+"/core/container.go", containerGo)
 
