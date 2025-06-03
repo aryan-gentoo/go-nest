@@ -42,21 +42,24 @@ func printUsage() {
 func createNewProject(name string) {
 	fmt.Println("🚀 Creating new Go Nest project:", name)
 
-	// Folder structure
+	// Create folder structure
 	os.Mkdir(name, 0755)
 	os.MkdirAll(name+"/modules/app", 0755)
 	os.MkdirAll(name+"/core", 0755)
 
 	// main.go
-	mainCode := `package main
+	mainGo := `package main
 
-import "fmt"
+import (
+	"` + name + `/core"
+)
 
 func main() {
-	fmt.Println("🚀 Welcome to ` + name + ` - powered by Go Nest")
+	app := core.NewApp()
+	app.Run()
 }
 `
-	writeFile(name+"/main.go", mainCode)
+	writeFile(name+"/main.go", mainGo)
 
 	// go.mod
 	cmd := exec.Command("go", "mod", "init", name)
@@ -65,12 +68,45 @@ func main() {
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
+	// core/app.go
+	appGo := `package core
+
+import "fmt"
+
+type App struct{}
+
+func NewApp() *App {
+	return &App{}
+}
+
+func (a *App) Run() {
+	fmt.Println("🚀 Go Nest app is running!")
+}
+`
+	writeFile(name+"/core/app.go", appGo)
+
+	// core/container.go
+	containerGo := `package core
+
+// Use this file to manage DI (Dependency Injection)
+`
+	writeFile(name+"/core/container.go", containerGo)
+
+	// modules/app
+	generateModuleInPath("app", name+"/modules")
+
 	fmt.Println("✅ Project created at ./" + name)
 }
 
 func generateModule(name string) {
 	fmt.Println("📦 Generating module:", name)
-	os.MkdirAll("modules/"+name, 0755)
+	generateModuleInPath(name, "modules")
+	fmt.Println("✅ Module", name, "generated.")
+}
+
+func generateModuleInPath(name, basePath string) {
+	modulePath := basePath + "/" + name
+	os.MkdirAll(modulePath, 0755)
 
 	controller := `package ` + name + `
 
@@ -80,7 +116,7 @@ func Get() {
 	fmt.Println("Hello from ` + name + ` controller")
 }
 `
-	writeFile("modules/"+name+"/controller.go", controller)
+	writeFile(modulePath+"/controller.go", controller)
 
 	service := `package ` + name + `
 
@@ -88,15 +124,13 @@ func FindAll() []string {
 	return []string{"item1", "item2"}
 }
 `
-	writeFile("modules/"+name+"/service.go", service)
+	writeFile(modulePath+"/service.go", service)
 
 	module := `package ` + name + `
 
 // Register your module here
 `
-	writeFile("modules/"+name+"/module.go", module)
-
-	fmt.Println("✅ Module", name, "generated.")
+	writeFile(modulePath+"/module.go", module)
 }
 
 func writeFile(path, content string) {
