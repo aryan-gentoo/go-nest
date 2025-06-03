@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
 func main() {
@@ -27,6 +30,8 @@ func main() {
 			return
 		}
 		generateModule(os.Args[3])
+	case "refresh":
+		refreshMainFile(".")
 	default:
 		printUsage()
 	}
@@ -37,33 +42,15 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  go-nest-cli new <project-name>       Create a new project")
 	fmt.Println("  go-nest-cli g module <module-name>   Generate a module")
+	fmt.Println("  go-nest-cli refresh                  Regenerate main.go with all modules")
 }
 
 func createNewProject(name string) {
 	fmt.Println("🚀 Creating new Go Nest project:", name)
 
-	// Folder structure
 	os.Mkdir(name, 0755)
-	os.MkdirAll(name+"/modules/app", 0755)
-	os.MkdirAll(name+"/core", 0755)
-
-	// main.go
-	mainGo := `package main
-
-import (
-	"` + name + `/core"
-	"` + name + `/modules/app"
-)
-
-func main() {
-	app.RegisterDependencies()
-	core.Container.Invoke(func(c *app.Controller) {
-		a := core.NewApp(c)
-		a.Run(":8080")
-	})
-}
-`
-	writeFile(name+"/main.go", mainGo)
+	os.MkdirAll(filepath.Join(name, "modules", "app"), 0755)
+	os.MkdirAll(filepath.Join(name, "core"), 0755)
 
 	// go.mod
 	cmd := exec.Command("go", "mod", "init", name)
@@ -104,21 +91,19 @@ func (a *App) Run(addr string) {
 	}
 	log.Println("Server started at", addr)
 	http.ListenAndServe(addr, a.router)
-}
-`
-	writeFile(name+"/core/app.go", appGo)
+}`
+	writeFile(filepath.Join(name, "core", "app.go"), appGo)
 
 	// container.go
 	containerGo := `package core
 
 import "go.uber.org/dig"
 
-var Container = dig.New()
-`
-	writeFile(name+"/core/container.go", containerGo)
+var Container = dig.New()`
+	writeFile(filepath.Join(name, "core", "container.go"), containerGo)
 
-	// Default module: app
-	generateModuleInPath("app", name+"/modules")
+	generateModuleInPath("app", filepath.Join(name, "modules"))
+	refreshMainFile(name)
 
 	fmt.Println("✅ Project created at ./" + name)
 }
@@ -126,11 +111,12 @@ var Container = dig.New()
 func generateModule(name string) {
 	fmt.Println("📦 Generating module:", name)
 	generateModuleInPath(name, "modules")
+	refreshMainFile(".")
 	fmt.Println("✅ Module", name, "generated.")
 }
 
 func generateModuleInPath(name, basePath string) {
-	modulePath := basePath + "/" + name
+	modulePath := filepath.Join(basePath, name)
 	os.MkdirAll(modulePath, 0755)
 
 	controller := `package ` + name + `
@@ -159,9 +145,8 @@ func (c *Controller) handleGet(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		fmt.Fprintln(w, item)
 	}
-}
-`
-	writeFile(modulePath+"/controller.go", controller)
+}`
+	writeFile(filepath.Join(modulePath, "controller.go"), controller)
 
 	service := `package ` + name + `
 
@@ -173,9 +158,8 @@ func NewService() *Service {
 
 func (s *Service) FindAll() []string {
 	return []string{"item1", "item2"}
-}
-`
-	writeFile(modulePath+"/service.go", service)
+}`
+	writeFile(filepath.Join(modulePath, "service.go"), service)
 
 	module := `package ` + name + `
 
@@ -184,27 +168,55 @@ import "PROJECT_NAME/core"
 func RegisterDependencies() {
 	core.Container.Provide(NewService)
 	core.Container.Provide(NewController)
+}`
+	module = strings.ReplaceAll(module, "PROJECT_NAME", getProjectNameFromPath(basePath))
+	writeFile(filepath.Join(modulePath, "module.go"), module)
 }
-`
-	module = replace(module, "PROJECT_NAME", getProjectNameFromPath(basePath))
-	writeFile(modulePath+"/module.go", module)
+
+func refreshMainFile(projectDir string) {
+	modulesDir := filepath.Join(projectDir, "modules")
+	entries, err := ioutil.ReadDir(modulesDir)
+	if err != nil {
+		fmt.Println("❌ Failed to read modules directory:", err)
+		return
+	}
+
+	imports := []string{}
+	invokes := []string{}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			mod := entry.Name()
+			imports = append(imports, fmt.Sprintf("\t\"%s/modules/%s\"", projectDir, mod))
+			invokes = append(invokes, fmt.Sprintf("\t%s.RegisterDependencies()", mod))
+			invokes = append(invokes, fmt.Sprintf("\tcore.Container.Invoke(func(c *%s.Controller) { modules = append(modules, c) })", mod))
+		}
+	}
+
+	contents := fmt.Sprintf(`package main
+
+import (
+	"%s/core"
+%s
+)
+
+func main() {
+%s
+
+	var modules []core.Module
+%s
+	app := core.NewApp(modules...)
+	app.Run(":8080")
+}`, projectDir, strings.Join(imports, "\n"), strings.Join(invokes[:len(invokes)/2], "\n"), strings.Join(invokes[len(invokes)/2:], "\n"))
+
+	writeFile(filepath.Join(projectDir, "main.go"), contents)
 }
 
 func writeFile(path, content string) {
 	os.WriteFile(path, []byte(content), 0644)
 }
 
-func replace(s, old, new string) string {
-	return string([]byte(s))
-	// You can enhance this to safely replace identifiers
-}
-
 func getProjectNameFromPath(basePath string) string {
-	parts := []byte(basePath)
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] == '/' || parts[i] == '\\' {
-			return string(parts[i+1:])
-		}
-	}
-	return string(parts)
+	clean := filepath.Clean(basePath)
+	return filepath.Base(clean)
 }
