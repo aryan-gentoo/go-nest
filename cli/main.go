@@ -3,103 +3,102 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
+	"os/exec"
 )
 
-func pascalCase(s string) string {
-	return strings.Title(s)
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		return
+	}
+
+	cmd := os.Args[1]
+
+	switch cmd {
+	case "new":
+		if len(os.Args) < 3 {
+			fmt.Println("❌ Project name required")
+			return
+		}
+		createNewProject(os.Args[2])
+	case "g":
+		if len(os.Args) < 4 || os.Args[2] != "module" {
+			fmt.Println("❌ Usage: go-nest-cli g module <name>")
+			return
+		}
+		generateModule(os.Args[3])
+	default:
+		printUsage()
+	}
+}
+
+func printUsage() {
+	fmt.Println("Go Nest CLI")
+	fmt.Println("Usage:")
+	fmt.Println("  go-nest-cli new <project-name>       Create a new project")
+	fmt.Println("  go-nest-cli g module <module-name>   Generate a module")
+}
+
+func createNewProject(name string) {
+	fmt.Println("🚀 Creating new Go Nest project:", name)
+
+	// Folder structure
+	os.Mkdir(name, 0755)
+	os.MkdirAll(name+"/modules/app", 0755)
+	os.MkdirAll(name+"/core", 0755)
+
+	// main.go
+	mainCode := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("🚀 Welcome to ` + name + ` - powered by Go Nest")
+}
+`
+	writeFile(name+"/main.go", mainCode)
+
+	// go.mod
+	cmd := exec.Command("go", "mod", "init", name)
+	cmd.Dir = name
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
+
+	fmt.Println("✅ Project created at ./" + name)
 }
 
 func generateModule(name string) {
-	moduleName := strings.ToLower(name)
-	pascal := pascalCase(name)
-	dir := fmt.Sprintf("modules/%s", moduleName)
+	fmt.Println("📦 Generating module:", name)
+	os.MkdirAll("modules/"+name, 0755)
 
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
-		fmt.Println("❌ Failed to create module directory:", err)
-		return
-	}
+	controller := `package ` + name + `
 
-	write := func(filename, content string) {
-		err := os.WriteFile(fmt.Sprintf("%s/%s.go", dir, filename), []byte(content), 0644)
-		if err != nil {
-			fmt.Println("❌ Failed to write", filename, ":", err)
-		}
-	}
+import "fmt"
 
-	write("service", fmt.Sprintf(`package %s
-
-type %sService struct {}
-
-func New%sService() *%sService {
-	return &%sService{}
+func Get() {
+	fmt.Println("Hello from ` + name + ` controller")
 }
-`, moduleName, pascal, pascal, pascal, pascal))
+`
+	writeFile("modules/"+name+"/controller.go", controller)
 
-	write("controller", fmt.Sprintf(`package %s
+	service := `package ` + name + `
 
-import (
-	"encoding/json"
-	"net/http"
-	"github.com/go-chi/chi/v5"
-)
+func FindAll() []string {
+	return []string{"item1", "item2"}
+}
+`
+	writeFile("modules/"+name+"/service.go", service)
 
-type %sController struct {
-	service *%sService
+	module := `package ` + name + `
+
+// Register your module here
+`
+	writeFile("modules/"+name+"/module.go", module)
+
+	fmt.Println("✅ Module", name, "generated.")
 }
 
-func New%sController(service *%sService) *%sController {
-	return &%sController{service}
-}
-
-func (c *%sController) RegisterRoutes(r chi.Router) {
-	r.Route("/%s", func(r chi.Router) {
-		r.Get("/", c.GetAll)
-	})
-}
-
-func (c *%sController) GetAll(w http.ResponseWriter, r *http.Request) {
-	data := []string{"example"}
-	json.NewEncoder(w).Encode(data)
-}
-`, moduleName, pascal, pascal, pascal, pascal, pascal, pascal, pascal, moduleName, pascal))
-
-	write("module", fmt.Sprintf(`package %s
-
-import (
-	"github.com/go-chi/chi/v5"
-	"go.uber.org/dig"
-)
-
-type Module struct {
-	Controller *%sController
-}
-
-func NewModule(container *dig.Container) *Module {
-	container.Provide(New%sService)
-	container.Provide(New%sController)
-
-	var controller *%sController
-	_ = container.Invoke(func(c *%sController) {
-		controller = c
-	})
-
-	return &Module{Controller: controller}
-}
-
-func (m *Module) RegisterRoutes(r chi.Router) {
-	m.Controller.RegisterRoutes(r)
-}
-`, moduleName, pascal, pascal, pascal, pascal, pascal))
-
-	fmt.Println("✅ Module", name, "created at", dir)
-}
-
-func main() {
-	if len(os.Args) < 4 || os.Args[1] != "g" || os.Args[2] != "module" {
-		fmt.Println("Usage: go run cli/main.go g module <name>")
-		return
-	}
-	generateModule(os.Args[3])
+func writeFile(path, content string) {
+	os.WriteFile(path, []byte(content), 0644)
 }
