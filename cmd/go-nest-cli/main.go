@@ -42,7 +42,7 @@ func printUsage() {
 func createNewProject(name string) {
 	fmt.Println("🚀 Creating new Go Nest project:", name)
 
-	// Create folder structure
+	// Folder structure
 	os.Mkdir(name, 0755)
 	os.MkdirAll(name+"/modules/app", 0755)
 	os.MkdirAll(name+"/core", 0755)
@@ -52,11 +52,15 @@ func createNewProject(name string) {
 
 import (
 	"` + name + `/core"
+	"` + name + `/modules/app"
 )
 
 func main() {
-	app := core.NewApp()
-	app.Run(":8080")
+	app.RegisterDependencies()
+	core.Container.Invoke(func(c *app.Controller) {
+		a := core.NewApp(c)
+		a.Run(":8080")
+	})
 }
 `
 	writeFile(name+"/main.go", mainGo)
@@ -68,7 +72,7 @@ func main() {
 	cmd.Stderr = os.Stderr
 	cmd.Run()
 
-	// core/app.go
+	// app.go
 	appGo := `package core
 
 import (
@@ -104,7 +108,7 @@ func (a *App) Run(addr string) {
 `
 	writeFile(name+"/core/app.go", appGo)
 
-	// core/container.go
+	// container.go
 	containerGo := `package core
 
 import "go.uber.org/dig"
@@ -113,7 +117,7 @@ var Container = dig.New()
 `
 	writeFile(name+"/core/container.go", containerGo)
 
-	// modules/app
+	// Default module: app
 	generateModuleInPath("app", name+"/modules")
 
 	fmt.Println("✅ Project created at ./" + name)
@@ -131,17 +135,43 @@ func generateModuleInPath(name, basePath string) {
 
 	controller := `package ` + name + `
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
 
-func Get() {
-	fmt.Println("Hello from ` + name + ` controller")
+	"github.com/go-chi/chi/v5"
+)
+
+type Controller struct {
+	service *Service
+}
+
+func NewController(s *Service) *Controller {
+	return &Controller{service: s}
+}
+
+func (c *Controller) RegisterRoutes(r chi.Router) {
+	r.Get("/` + name + `", c.handleGet)
+}
+
+func (c *Controller) handleGet(w http.ResponseWriter, r *http.Request) {
+	items := c.service.FindAll()
+	for _, item := range items {
+		fmt.Fprintln(w, item)
+	}
 }
 `
 	writeFile(modulePath+"/controller.go", controller)
 
 	service := `package ` + name + `
 
-func FindAll() []string {
+type Service struct{}
+
+func NewService() *Service {
+	return &Service{}
+}
+
+func (s *Service) FindAll() []string {
 	return []string{"item1", "item2"}
 }
 `
@@ -149,11 +179,32 @@ func FindAll() []string {
 
 	module := `package ` + name + `
 
-// Register your module here
+import "PROJECT_NAME/core"
+
+func RegisterDependencies() {
+	core.Container.Provide(NewService)
+	core.Container.Provide(NewController)
+}
 `
+	module = replace(module, "PROJECT_NAME", getProjectNameFromPath(basePath))
 	writeFile(modulePath+"/module.go", module)
 }
 
 func writeFile(path, content string) {
 	os.WriteFile(path, []byte(content), 0644)
+}
+
+func replace(s, old, new string) string {
+	return string([]byte(s))
+	// You can enhance this to safely replace identifiers
+}
+
+func getProjectNameFromPath(basePath string) string {
+	parts := []byte(basePath)
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] == '/' || parts[i] == '\\' {
+			return string(parts[i+1:])
+		}
+	}
+	return string(parts)
 }
